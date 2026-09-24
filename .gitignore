@@ -1,22 +1,44 @@
-# download directory
-down/*
+# ============================================================================
+# kubeasz 环境版本管理 — .gitignore
+#
+# 基于上游 kubeasz 3.6.9 的 .gitignore，追加「跟踪本集群配置」的规则。
+# 分三类：体积过大的安装缓存 / 私钥与凭据 / 备份与生成物。
+# ============================================================================
 
-# binaries directory
+# --- 上游原有：安装缓存（down 21G、bin 1.4G，绝不入库） --------------------
+down/*
 bin/*
 
-# k8s storage manifests 
+# --- 上游原有：k8s storage manifests ---------------------------------------
 manifests/storage/*
 !manifests/storage/test.yaml
 !manifests/storage/local-storage/
 
-# role based variable settings, exclude roles/os-harden/vars/
-#/roles/*/vars/*
-#!/roles/os-harden/vars/
-
-# cluster instances
-clusters/
-
-#
+# --- 上游原有：证书与私钥 --------------------------------------------------
 *.crt
 *.key
 *.pem
+
+# --- 集群实例：默认全部忽略，只放行本集群的「配置源码」 --------------------
+# 注意：git 无法在被排除的目录内部再放行文件，
+#       所以必须用 clusters/*（排除直接子项）而不是 clusters/（排除目录本身）。
+clusters/*
+!clusters/k8s-baremetal-01/
+clusters/k8s-baremetal-01/*
+!clusters/k8s-baremetal-01/hosts
+!clusters/k8s-baremetal-01/config.yml
+!clusters/k8s-baremetal-01/yml
+
+# --- 显式排除：私钥 / 凭据 / etcd 快照（SECRET，禁止入库） -----------------
+clusters/k8s-baremetal-01/ssl/
+clusters/k8s-baremetal-01/backup/
+clusters/k8s-baremetal-01/*.kubeconfig
+
+# --- 备份与临时文件 --------------------------------------------------------
+*.bak
+*.bak.*
+*.orig
+*.rej
+__pycache__/
+*.pyc
+.ansible/
