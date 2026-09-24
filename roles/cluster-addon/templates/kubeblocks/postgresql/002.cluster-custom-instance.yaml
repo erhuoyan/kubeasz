@@ -1,0 +1,59 @@
+apiVersion: apps.kubeblocks.io/v1
+kind: Cluster
+metadata:
+  name: pg-cluster
+spec:
+  terminationPolicy: DoNotTerminate
+  clusterDef: postgresql
+  topology: replication
+  componentSpecs:
+    - name: postgresql
+      disableExporter: false
+      serviceVersion: "16.4.0"
+      labels:
+        apps.kubeblocks.postgres.patroni/scope: pg-cluster-postgresql
+      replicas: 2
+      env:
+        - name: LANG
+          value: "C.UTF-8"
+        - name: TZ
+          value: Asia/Shanghai
+      instances:
+        - name: tpl1         # first template
+          replicas: 1
+          ordinals:
+            ranges:
+              - start: 101
+                end: 200
+          resources:
+            limits:
+              cpu: '1'
+              memory: 2Gi
+          volumeClaimTemplates: # tpl1's vct
+            - name: data
+              spec:
+                storageClassName: "lvm-data1"
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 10Gi
+        - name: tpl2  # second template
+          replicas: 1
+          ordinals:
+            ranges:
+              - start: 201
+                end: 300
+          resources:
+            limits:
+              cpu: '1'
+              memory: 4Gi
+          volumeClaimTemplates: # tpl2's vct
+            - name: data
+              spec:
+                storageClassName: "lvm-data2"
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 5Gi

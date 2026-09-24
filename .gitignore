@@ -1,0 +1,22 @@
+# download directory
+down/*
+
+# binaries directory
+bin/*
+
+# k8s storage manifests 
+manifests/storage/*
+!manifests/storage/test.yaml
+!manifests/storage/local-storage/
+
+# role based variable settings, exclude roles/os-harden/vars/
+#/roles/*/vars/*
+#!/roles/os-harden/vars/
+
+# cluster instances
+clusters/
+
+#
+*.crt
+*.key
+*.pem

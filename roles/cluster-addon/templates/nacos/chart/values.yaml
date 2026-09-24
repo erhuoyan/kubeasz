@@ -1,0 +1,26 @@
+global:
+  mysql: 
+    host: "semisync-mysql-cluster-mysql.db.svc"
+    port: 3306
+    user: "xxx"
+    password: "X8xxxxxx"
+
+mysql:
+  database: "nacosconfig"
+
+app:
+  topology: "standalone"                            # 单机版：standalone | 集群版：cluster
+  replicas: 3                                       # 仅集群版有效
+  repository: "nacos/nacos-server"
+  tag: "v2.4.3"
+  resources:
+    limits:
+      cpu: "1"
+      memory: 4Gi
+    requests:
+      cpu: 500m
+      memory: 2Gi
+
+ingress:
+  enable: false
+  host: ""

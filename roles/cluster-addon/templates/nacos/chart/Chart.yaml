@@ -1,0 +1,7 @@
+apiVersion: v1
+name: nacos
+description: Nacos主要用于服务发现、配置管理和服务管理等功能，支持动态服务发现、配置管理和服务治理。替代掉edas的功能。
+type: application
+version: 0.1.1
+appVersion: 2.4.3
+
