@@ -10,6 +10,12 @@ localpv-provisioner:
       limits:
         cpu: 100m
         memory: 128Mi
+    nodeSelector:
+      node-role.kubernetes.io/infra: ""
+    tolerations:
+      - key: node-role.kubernetes.io/infra
+        operator: Exists
+        effect: NoSchedule
 
 lvm-localpv:
   lvmNode:
@@ -18,6 +24,10 @@ lvm-localpv:
         registry: easzlab.io.local:5000/
         repository: openebs/csi-node-driver-registrar
     kubeletDir: "{{ KUBELET_ROOT_DIR }}"
+    tolerations:
+      - key: node-role.kubernetes.io/infra
+        operator: Exists
+        effect: NoSchedule
     resources:
       limits:
         cpu: 100m
@@ -43,6 +53,12 @@ lvm-localpv:
       limits:
         cpu: 100m
         memory: 128Mi
+    nodeSelector:
+      node-role.kubernetes.io/infra: ""
+    tolerations:
+      - key: node-role.kubernetes.io/infra
+        operator: Exists
+        effect: NoSchedule
   lvmPlugin:
     image:
       registry: easzlab.io.local:5000/

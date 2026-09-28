@@ -1,3 +1,5 @@
+- import_tasks: node-infra.yml
+
 - name: 获取所有已经创建的POD信息
   command: "{{ base_dir }}/bin/kubectl get pod --all-namespaces"
   register: pod_info

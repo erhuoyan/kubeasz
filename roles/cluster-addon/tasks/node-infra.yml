@@ -1,0 +1,79 @@
+---
+# ============================================================================
+# node-infra — 把 [infra] 组节点标记为「基础设施节点」（OpenShift infra node 模型）
+#
+#   label : node-role.kubernetes.io/infra=""
+#   taint : node-role.kubernetes.io/infra:<effect>   （默认 NoSchedule）
+#   uncordon（污点已负责隔离；kubeasz 默认 cordon 与之语义重复）
+#
+# 幂等：kubectl label/taint --overwrite，可反复执行
+# 无副作用：[infra] 未定义时全部跳过
+# ============================================================================
+
+- name: 基础设施节点 | 未定义 [infra] 组则跳过
+  debug:
+    msg: "[infra] 未定义或为空，跳过设施节点标记"
+  when: (groups['infra'] | default([])) | length == 0
+
+- name: 基础设施节点 | [infra] 成员必须已被 kubeasz 纳管
+  fail:
+    msg: >-
+      [infra] 成员 {{ item }} 既不在 [kube_master] 也不在 [kube_node] 中。
+      kubelet 未安装 → 节点不在集群里，无法打标记。
+      请先把它加入 [kube_node]（或 [kube_master]）。
+  loop: "{{ groups['infra'] | default([]) }}"
+  when:
+    - item not in (groups['kube_master'] | default([]))
+    - item not in (groups['kube_node'] | default([]))
+
+- name: 基础设施节点 | 打 label (node-role.kubernetes.io/infra)
+  shell: >-
+    {{ base_dir }}/bin/kubectl label node
+    {{ hostvars[item]['K8S_NODENAME'] | default(item) }}
+    node-role.kubernetes.io/infra="" --overwrite
+  loop: "{{ groups['infra'] | default([]) }}"
+  loop_control:
+    label: "{{ hostvars[item]['K8S_NODENAME'] | default(item) }}"
+  when: (groups['infra'] | default([])) | length > 0
+  changed_when: false
+  failed_when: false
+  connection: local
+
+- name: 基础设施节点 | 打 taint
+  shell: >-
+    {{ base_dir }}/bin/kubectl taint node
+    {{ hostvars[item]['K8S_NODENAME'] | default(item) }}
+    node-role.kubernetes.io/infra:{{ infra_node_taint_effect | default('NoSchedule') }}
+    --overwrite
+  loop: "{{ groups['infra'] | default([]) }}"
+  loop_control:
+    label: "{{ hostvars[item]['K8S_NODENAME'] | default(item) }}"
+  when:
+    - (groups['infra'] | default([])) | length > 0
+    - (infra_node_taint_effect | default('NoSchedule')) | length > 0
+  changed_when: false
+  failed_when: false
+  connection: local
+
+- name: 基础设施节点 | uncordon（污点单独负责隔离）
+  shell: >-
+    {{ base_dir }}/bin/kubectl uncordon
+    {{ hostvars[item]['K8S_NODENAME'] | default(item) }}
+  loop: "{{ groups['infra'] | default([]) }}"
+  loop_control:
+    label: "{{ hostvars[item]['K8S_NODENAME'] | default(item) }}"
+  when:
+    - (groups['infra'] | default([])) | length > 0
+    - infra_node_uncordon | default(true) | bool
+  changed_when: false
+  failed_when: false
+  connection: local
+
+- name: 基础设施节点 | 结果
+  debug:
+    msg: >-
+      infra 节点就绪:
+      {% for h in groups['infra'] | default([]) -%}
+      {{ hostvars[h]['K8S_NODENAME'] | default(h) }}{{ ',' if not loop.last }}
+      {%- endfor %}
+  when: (groups['infra'] | default([])) | length > 0

@@ -180,6 +180,11 @@ spec:
           name: tmp-dir
       nodeSelector:
         kubernetes.io/os: linux
+        node-role.kubernetes.io/infra: ""
+      tolerations:
+        - key: node-role.kubernetes.io/infra
+          operator: Exists
+          effect: NoSchedule
       priorityClassName: system-cluster-critical
       serviceAccountName: metrics-server
       volumes:

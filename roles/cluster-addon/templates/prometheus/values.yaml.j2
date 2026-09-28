@@ -10,6 +10,13 @@ alertmanager:
   service:
     nodePort: 30902
     type: NodePort 
+  alertmanagerSpec:
+    nodeSelector:
+      node-role.kubernetes.io/infra: ""
+    tolerations:
+      - key: node-role.kubernetes.io/infra
+        operator: Exists
+        effect: NoSchedule
 
 ## Using default values from https://github.com/grafana/helm-charts/blob/main/charts/grafana/values.yaml
 grafana:
@@ -25,6 +32,12 @@ grafana:
     image:
       repository: prometheus/k8s-sidecar
     skipTlsVerify: true
+  nodeSelector:
+    node-role.kubernetes.io/infra: ""
+  tolerations:
+    - key: node-role.kubernetes.io/infra
+      operator: Exists
+      effect: NoSchedule
 
 ## Flag to disable all the kubernetes component scrapers
 kubernetesServiceMonitors:
@@ -105,6 +118,12 @@ kube-state-metrics:
   image:
     registry: easzlab.io.local:5000
     repository: easzlab/kube-state-metrics
+  nodeSelector:
+    node-role.kubernetes.io/infra: ""
+  tolerations:
+    - key: node-role.kubernetes.io/infra
+      operator: Exists
+      effect: NoSchedule
 
 ## Deploy node exporter as a daemonset to all nodes
 nodeExporter:
@@ -126,6 +145,12 @@ prometheus-node-exporter:
 ## Manages Prometheus and Alertmanager components
 prometheusOperator:
   enabled: true
+  nodeSelector:
+    node-role.kubernetes.io/infra: ""
+  tolerations:
+    - key: node-role.kubernetes.io/infra
+      operator: Exists
+      effect: NoSchedule
   admissionWebhooks:
     enabled: true
     patch:
@@ -155,7 +180,13 @@ prometheus:
   prometheusSpec:
     image:
       registry: easzlab.io.local:5000
-    replicas: 1
+    replicas: 2
+    nodeSelector:
+      node-role.kubernetes.io/infra: ""
+    tolerations:
+      - key: node-role.kubernetes.io/infra
+        operator: Exists
+        effect: NoSchedule
     retention: 30d
     secrets:
     - etcd-client-cert

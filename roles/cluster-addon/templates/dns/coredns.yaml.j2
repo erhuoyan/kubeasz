@@ -93,7 +93,7 @@ metadata:
     addonmanager.kubernetes.io/mode: Reconcile
     kubernetes.io/name: "CoreDNS"
 spec:
-  replicas: 1
+  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -125,8 +125,12 @@ spec:
       tolerations:
         - key: "CriticalAddonsOnly"
           operator: "Exists"
+        - key: node-role.kubernetes.io/infra
+          operator: Exists
+          effect: NoSchedule
       nodeSelector:
         kubernetes.io/os: linux
+        node-role.kubernetes.io/infra: ""
       containers:
       - name: coredns
         image: easzlab.io.local:5000/easzlab/coredns:{{ corednsVer }}

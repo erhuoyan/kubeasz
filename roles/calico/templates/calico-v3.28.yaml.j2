@@ -607,6 +607,7 @@ spec:
     spec:
       nodeSelector:
         kubernetes.io/os: linux
+        node-role.kubernetes.io/infra: ""
       tolerations:
         # Mark the pod as a critical add-on for rescheduling.
         - key: CriticalAddonsOnly
@@ -614,6 +615,9 @@ spec:
         - key: node-role.kubernetes.io/master
           effect: NoSchedule
         - key: node-role.kubernetes.io/control-plane
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/infra
+          operator: Exists
           effect: NoSchedule
       serviceAccountName: calico-kube-controllers
       priorityClassName: system-cluster-critical

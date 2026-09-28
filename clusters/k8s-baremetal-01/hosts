@@ -19,6 +19,15 @@
 192.168.150.14 k8s_nodename='k8s-worker-01'
 192.168.150.15 k8s_nodename='k8s-worker-02'
 
+# [optional] 基础设施节点（OpenShift infra node 模型）
+# 成员必须是【已纳管】的节点，即已在 [kube_master] 或 [kube_node] 中 ——
+# 本角色只负责给它们打标记，不负责安装 kubelet/containerd/CNI。
+# 换环境（例如生产用专用中间件节点）只需改这里的 IP。
+[infra]
+192.168.150.11
+192.168.150.12
+192.168.150.13
+
 # [optional] harbor server, a private docker registry
 # 'NEW_INSTALL': 'true' to install a harbor server; 'false' to integrate with existed one
 [harbor]
