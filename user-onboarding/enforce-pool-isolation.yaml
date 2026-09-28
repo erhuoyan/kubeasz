@@ -1,0 +1,271 @@
+# ============================================================================
+# enforce-pool-isolation.yaml — 禁止租户工作负载落到 infra（master）节点
+#
+# 背景（为什么光靠污点不够）:
+#   1. infra 节点的隔离靠 taint `node-role.kubernetes.io/infra:NoSchedule`。
+#      但 taint 是【公开信息】(kubectl describe node 就能看到)，任何用户只要在
+#      Pod 里写一条匹配的 toleration 就能调度到 master —— RBAC 拦不住，
+#      因为 toleration 是 Pod spec 的普通字段。
+#
+#   2. 更隐蔽的是 `spec.nodeName` 直绑: 它【完全绕过调度器】。
+#      而 kubelet 侧只检查 NoExecute 污点，不检查 NoSchedule
+#      (源码 pkg/kubelet/lifecycle/predicate.go:448-457):
+#          // Check taint/toleration except for static pods
+#          // Kubelet is only interested in the NoExecute taint.
+#          return t.Effect == v1.TaintEffectNoExecute
+#      → 即使 Pod 被直绑到 tainted 的 master，kubelet 也会照跑。
+#
+# 所以必须在【准入层】封堵。本文件用 ValidatingAdmissionPolicy (CEL)，
+# 无需装 webhook、无需重启 apiserver（k8s 1.30+ GA，本集群 v1.35.4）。
+#
+# ⚠️ CEL 关键陷阱（踩过一次）:
+#   在 VAP 的 CEL 里，访问【不存在的字段】会直接报错
+#       "no such key: nodeSelector"
+#   而表达式出错 = 校验失败 = 请求被拒（不是"跳过"）。
+#   所以每个可能缺省的字段（nodeSelector / nodeName / tolerations /
+#   priorityClassName / affinity）都必须用 has() 守卫：
+#       !has(x.field) || <正常判断>
+#   否则会把所有正常 Pod 一起拒掉。
+#
+# 作用域模型 —— fail-closed:
+#   policy 默认对【所有命名空间】生效；平台命名空间通过标签
+#       pool-access=privileged
+#   显式豁免。这样将来新增租户 ns 自动受保护；若新增平台组件忘了打标签，
+#   会立刻 denied（可见的失败），而不是留下静默的洞。
+#
+# 部署:
+#   kubectl apply -f enforce-pool-isolation.yaml
+#   kubectl label ns kube-system monitor openebs kb-system pool-access=privileged --overwrite
+#
+# 维护提示:
+#   infraNodes 里是 3 台 master 的节点名。若节点改名/扩容 master，
+#   必须同步更新本文件的 3 处 infraNodes 变量。
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# 1/3 Pod
+# 校验逐条说明（对 Pod 的 spec）:
+#   ① 不得容忍 infra 污点          —— 挡 toleration 绕过
+#   ② 不得用 nodeSelector 选中 infra
+#   ③ 不得用 nodeName 直绑 infra   —— 绕过调度器，最危险
+#   ④ 不得用 nodeAffinity 硬亲和选中 infra
+#   ⑤ 不得抢占平台组件的优先级类
+# ---------------------------------------------------------------------------
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tenant-pool-guard-pods
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  variables:
+    - name: infraKey
+      expression: "'node-role.kubernetes.io/infra'"
+    - name: infraNodes
+      expression: "['k8s-master-01', 'k8s-master-02', 'k8s-master-03']"
+    - name: reservedClasses
+      expression: "['system-node-critical', 'system-cluster-critical']"
+    - name: s
+      expression: "object.spec"
+  validations:
+    # ① 容忍 infra 污点
+    - expression: >-
+        !has(variables.s.tolerations) ||
+        variables.s.tolerations.all(t, t.key != variables.infraKey)
+      message: >-
+        禁止容忍 infra 污点 (node-role.kubernetes.io/infra)。
+        infra 节点（master）只运行平台组件；业务工作负载必须调度到 worker 节点，无需任何 toleration。
+    # ② nodeSelector 选中 infra
+    - expression: >-
+        !has(variables.s.nodeSelector) ||
+        !(variables.infraKey in variables.s.nodeSelector)
+      message: >-
+        禁止用 nodeSelector 选中 infra 节点 (node-role.kubernetes.io/infra)。
+        如需固定到节点，请用 nodeSelector: {kubernetes.io/role: node} 或 {kubernetes.io/hostname: k8s-worker-01}。
+    # ③ nodeName 直绑（绕过调度器，kubelet 不检查 NoSchedule，危害最大）
+    - expression: >-
+        !has(variables.s.nodeName) ||
+        !(variables.s.nodeName in variables.infraNodes)
+      message: >-
+        禁止用 spec.nodeName 直接绑定到 infra 节点。
+        该字段绕过调度器，且 kubelet 只检查 NoExecute 污点、不检查 NoSchedule，因此必须在此拦截。
+    # ④ nodeAffinity 硬亲和（required）指向 infra
+    - expression: >-
+        !has(variables.s.affinity) ||
+        !has(variables.s.affinity.nodeAffinity) ||
+        !has(variables.s.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution) ||
+        variables.s.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.all(term,
+          !(has(term.matchExpressions) && term.matchExpressions.exists(e, e.key == variables.infraKey)) &&
+          !(has(term.matchFields) && term.matchFields.exists(f,
+              f.key == 'metadata.name' && f.values.exists(v, v in variables.infraNodes))))
+      message: >-
+        禁止用 nodeAffinity 硬亲和选中 infra 节点。
+    # ⑤ 抢占平台组件的优先级类
+    - expression: >-
+        !has(variables.s.priorityClassName) ||
+        !(variables.s.priorityClassName in variables.reservedClasses)
+      message: >-
+        禁止使用 system-node-critical / system-cluster-critical 优先级类（会抢占平台组件）。
+        业务需要优先级请让管理员单独建 PriorityClass。
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tenant-pool-guard-pods
+spec:
+  policyName: tenant-pool-guard-pods
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      # fail-closed: 除非 ns 显式标注 pool-access=privileged，否则一律受管
+      matchExpressions:
+        - key: pool-access
+          operator: NotIn
+          values: ["privileged"]
+---
+# ---------------------------------------------------------------------------
+# 2/3 工作负载控制器（Deployment / StatefulSet / DaemonSet / ReplicaSet /
+#     ReplicationController / Job）
+#     校验的是 Pod 模板 —— 否则用户建个 Deployment 就绕过了。
+#     注意：Pod 模板【不经过】DefaultTolerationSeconds 默认化，
+#           所以 tolerations 很可能不存在 → has() 守卫尤其重要。
+# ---------------------------------------------------------------------------
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tenant-pool-guard-workloads
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["replicationcontrollers"]
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs"]
+  variables:
+    - name: infraKey
+      expression: "'node-role.kubernetes.io/infra'"
+    - name: infraNodes
+      expression: "['k8s-master-01', 'k8s-master-02', 'k8s-master-03']"
+    - name: reservedClasses
+      expression: "['system-node-critical', 'system-cluster-critical']"
+    - name: s
+      expression: "object.spec.template.spec"
+  validations:
+    - expression: >-
+        !has(variables.s.tolerations) ||
+        variables.s.tolerations.all(t, t.key != variables.infraKey)
+      message: "禁止容忍 infra 污点（在工作负载的 Pod 模板里）。业务负载请调度到 worker 节点。"
+    - expression: >-
+        !has(variables.s.nodeSelector) ||
+        !(variables.infraKey in variables.s.nodeSelector)
+      message: "禁止用 nodeSelector 选中 infra 节点（在工作负载的 Pod 模板里）。"
+    - expression: >-
+        !has(variables.s.nodeName) ||
+        !(variables.s.nodeName in variables.infraNodes)
+      message: "禁止用 spec.nodeName 直接绑定到 infra 节点（在工作负载的 Pod 模板里）。"
+    - expression: >-
+        !has(variables.s.affinity) ||
+        !has(variables.s.affinity.nodeAffinity) ||
+        !has(variables.s.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution) ||
+        variables.s.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.all(term,
+          !(has(term.matchExpressions) && term.matchExpressions.exists(e, e.key == variables.infraKey)) &&
+          !(has(term.matchFields) && term.matchFields.exists(f,
+              f.key == 'metadata.name' && f.values.exists(v, v in variables.infraNodes))))
+      message: "禁止用 nodeAffinity 硬亲和选中 infra 节点（在工作负载的 Pod 模板里）。"
+    - expression: >-
+        !has(variables.s.priorityClassName) ||
+        !(variables.s.priorityClassName in variables.reservedClasses)
+      message: "禁止使用 system-node-critical / system-cluster-critical 优先级类。"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tenant-pool-guard-workloads
+spec:
+  policyName: tenant-pool-guard-workloads
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: pool-access
+          operator: NotIn
+          values: ["privileged"]
+---
+# ---------------------------------------------------------------------------
+# 3/3 CronJob（Pod 模板路径比 Job 多一层 jobTemplate）
+# ---------------------------------------------------------------------------
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tenant-pool-guard-cronjobs
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["cronjobs"]
+  variables:
+    - name: infraKey
+      expression: "'node-role.kubernetes.io/infra'"
+    - name: infraNodes
+      expression: "['k8s-master-01', 'k8s-master-02', 'k8s-master-03']"
+    - name: reservedClasses
+      expression: "['system-node-critical', 'system-cluster-critical']"
+    - name: s
+      expression: "object.spec.jobTemplate.spec.template.spec"
+  validations:
+    - expression: >-
+        !has(variables.s.tolerations) ||
+        variables.s.tolerations.all(t, t.key != variables.infraKey)
+      message: "禁止容忍 infra 污点（在 CronJob 的 Pod 模板里）。"
+    - expression: >-
+        !has(variables.s.nodeSelector) ||
+        !(variables.infraKey in variables.s.nodeSelector)
+      message: "禁止用 nodeSelector 选中 infra 节点（在 CronJob 的 Pod 模板里）。"
+    - expression: >-
+        !has(variables.s.nodeName) ||
+        !(variables.s.nodeName in variables.infraNodes)
+      message: "禁止用 spec.nodeName 直接绑定到 infra 节点（在 CronJob 的 Pod 模板里）。"
+    - expression: >-
+        !has(variables.s.affinity) ||
+        !has(variables.s.affinity.nodeAffinity) ||
+        !has(variables.s.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution) ||
+        variables.s.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms.all(term,
+          !(has(term.matchExpressions) && term.matchExpressions.exists(e, e.key == variables.infraKey)) &&
+          !(has(term.matchFields) && term.matchFields.exists(f,
+              f.key == 'metadata.name' && f.values.exists(v, v in variables.infraNodes))))
+      message: "禁止用 nodeAffinity 硬亲和选中 infra 节点（在 CronJob 的 Pod 模板里）。"
+    - expression: >-
+        !has(variables.s.priorityClassName) ||
+        !(variables.s.priorityClassName in variables.reservedClasses)
+      message: "禁止使用 system-node-critical / system-cluster-critical 优先级类。"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tenant-pool-guard-cronjobs
+spec:
+  policyName: tenant-pool-guard-cronjobs
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: pool-access
+          operator: NotIn
+          values: ["privileged"]

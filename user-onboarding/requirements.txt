@@ -1,0 +1,21 @@
+# ============================================================================
+# 用户接入工具 —— Python 依赖
+#
+# 唯一直接依赖：k8s 官方 Python 客户端。其余 21 个包都由它自动带入。
+#
+# 安装：
+#   ./setup-venv.sh                                    # 推荐（建 venv + 装依赖）
+#   ./venv/bin/pip install -r requirements.txt         # 手工装
+#
+# 详见 README「三、安装与依赖」——含完整传递依赖清单与内网离线安装步骤。
+# ============================================================================
+
+# k8s 官方 Python 客户端。
+# 提供 useradmin.py 用到的三样东西：
+#   kubernetes.client               各类 API 客户端
+#   kubernetes.config               加载 kubeconfig / in-cluster 配置
+#   kubernetes.client.rest.ApiException  捕获 API 错误（404 / 409 / SAR 等）
+#
+# 下限 29.0.0 足够（本环境实测 36.0.3）。
+# 若要完全锁定可复现版本，把 README 3.3 节的 22 行完整清单粘过来替换本行。
+kubernetes>=29.0.0

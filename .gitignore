@@ -3,6 +3,10 @@
 #
 # 基于上游 kubeasz 3.6.9 的 .gitignore，追加「跟踪本集群配置」的规则。
 # 分三类：体积过大的安装缓存 / 私钥与凭据 / 备份与生成物。
+#
+# ⚠️ 注意：.gitignore 不支持【行尾注释】—— `#` 只有位于行首才是注释，
+#          写在模式后面会被当成模式的一部分，导致该行永不匹配。
+#          所以本文件的注释一律独占一行。
 # ============================================================================
 
 # --- 上游原有：安装缓存（down 21G、bin 1.4G，绝不入库） --------------------
@@ -35,10 +39,15 @@ clusters/k8s-baremetal-01/yml/
 # --- 运行日志：ansible.cfg 的 log_path 落在这里（见 ansible.cfg:110）-------
 logs/
 
+# --- 用户接入工具：源码入库，生成物与凭据不入库 ----------------------------
+# Python 虚拟环境（用 ./setup-venv.sh 重建）
+user-onboarding/venv/
+# 用户 kubeconfig（含 SA token / 客户端私钥）—— SECRET，绝不入库
+*.kubeconfig
+
 # --- 显式排除：私钥 / 凭据 / etcd 快照（SECRET，禁止入库） -----------------
 clusters/k8s-baremetal-01/ssl/
 clusters/k8s-baremetal-01/backup/
-clusters/k8s-baremetal-01/*.kubeconfig
 
 # --- 备份与临时文件 --------------------------------------------------------
 *.bak
