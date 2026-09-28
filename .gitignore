@@ -32,6 +32,9 @@ clusters/k8s-baremetal-01/*
 # 不跟踪。入库会产生「与模板不一致的陈旧副本」，且每次 setup 后 git 变脏。
 clusters/k8s-baremetal-01/yml/
 
+# --- 运行日志：ansible.cfg 的 log_path 落在这里（见 ansible.cfg:110）-------
+logs/
+
 # --- 显式排除：私钥 / 凭据 / etcd 快照（SECRET，禁止入库） -----------------
 clusters/k8s-baremetal-01/ssl/
 clusters/k8s-baremetal-01/backup/
